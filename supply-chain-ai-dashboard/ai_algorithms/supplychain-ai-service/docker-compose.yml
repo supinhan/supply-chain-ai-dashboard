@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  ai-service:
+    build: .
+    container_name: supplychain_ai_service
+    ports:
+      - "8081:8000"
+    volumes:
+      - ./model:/app/model  # 挂载模型目录，方便在宿主机更新模型
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai    # 统一时区
