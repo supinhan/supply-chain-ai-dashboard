@@ -24,19 +24,19 @@
 
 ```mermaid
 graph TD
-    subgraph 表现层 (前端大屏)
+    subgraph 表现层 前端大屏
         Dashboard[Vue 3 大屏界面]
         Map[ECharts 物流热力地图]
         WebSocketClient[WebSocket 客户端]
     end
 
-    subgraph 逻辑层 (后端服务 FastAPI)
+    subgraph 逻辑层 后端服务 FastAPI
         API[RESTful API & WebSocket]
         ModelRunner[AI 模型推理引擎 (Scikit-learn/Pandas)]
         IngestController[数据注入控制器]
     end
 
-    subgraph 数据层 (存储设施)
+    subgraph 数据层 存储设施
         MySQL[(MySQL 关系型数据库)]
         Redis[(Redis 高性能缓存)]
     end

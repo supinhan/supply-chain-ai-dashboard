@@ -1,0 +1,12 @@
+.git
+.idea
+.DS_Store
+**/.DS_Store
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+frontend_ui/frontend_ui_v1/node_modules
+frontend_ui/frontend_ui_v1/dist
+ai_algorithms/train_risk_model.ipynb
+data_producer/dataset/*.csv
+ai_algorithms/supplychain-ai-service/data/*.csv

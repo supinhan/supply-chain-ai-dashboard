@@ -131,7 +131,8 @@ const wsIcon = ref('fa-spinner fa-spin')
 
 // ================== WebSocket 连接 ==================
 const connectWebSocket = () => {
-  socket = new WebSocket('ws://localhost:8081')
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  socket = new WebSocket(`${protocol}//${window.location.host}/api/v1/ws/alerts`)
 
   socket.onopen = () => {
     wsStatus.value = 'connected'

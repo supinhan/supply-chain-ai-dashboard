@@ -1,13 +1,3 @@
-version: '3.8'
-
-services:
-  ai-service:
-    build: .
-    container_name: supplychain_ai_service
-    ports:
-      - "8081:8000"
-    volumes:
-      - ./model:/app/model  # 挂载模型目录，方便在宿主机更新模型
-    restart: always
-    environment:
-      - TZ=Asia/Shanghai    # 统一时区
+# AI 服务已统一由项目根目录 docker-compose.yml 编排。
+# 如需单独运行 AI 服务，请在项目根目录执行：
+# docker compose up ai-service --build

@@ -13,16 +13,15 @@ Node.js：>= 18.0.0
 npm：>= 9.0.0
 浏览器：Chrome 90+ / Edge 90+ (推荐)
 测试调试：
-使用mock-server.js模拟后端输入来调试输出结果
-在新建终端cmd下
-npm run dev
-在另一终端cmd下
-node mock-server.js
-打开http://localhost:5173/观察效果
+推荐启动后端主服务后运行前端，Vite 已将 `/api` 代理到 `http://localhost:8000`。
+在新建终端下执行：
+`npm run dev`
+打开 `http://localhost:5173/` 观察效果。
+`mock-server.js` 仅保留为旧版离线模拟工具，统一联调以真实后端 WebSocket 为准。
 与后端交互说明
 前端通过两种方式与后端通信，完全符合 PRD/SDD 文档规范。
 1. WebSocket 实时数据 (UC-04, UC-06)
-连接地址：ws://localhost:8000/api/v1/ws/alerts
+连接地址：`/api/v1/ws/alerts`，浏览器会自动使用当前站点 host。
 用途：接收实时 KPI 更新和风险告警。
 数据格式：
 json
@@ -69,17 +68,5 @@ src/
 └── assets/          # 静态资源（图片、字体等）
 配置说明
 修改后端地址
-如需连接不同的后端环境，请修改 src/App.vue中的连接地址：
-javascript
-// src/App.vue
-const connectWebSocket = () => {
-  // 修改为你的后端 WebSocket 地址
-  socket = new WebSocket('ws://your-backend-domain:8000/api/v1/ws/alerts')
-}
-修改 HTTP 接口地址
-如需修改历史数据的 HTTP 接口地址，请修改 src/App.vue中的 fetch 请求：
-javascript
-// src/App.vue
-fetch('http://your-backend-domain:8000/api/v1/kpi/history')
-  .then(res => res.json())
-  .then(data => { /* ... */ })
+本地开发请修改 `vite.config.js` 中 `/api` proxy 的 `target`。
+Docker 部署请修改根目录 `docker-compose.yml` 或 `.env` 中对应端口配置。
