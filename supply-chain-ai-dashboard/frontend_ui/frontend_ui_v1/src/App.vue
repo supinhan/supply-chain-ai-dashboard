@@ -54,13 +54,14 @@
 
       <!-- 中间：地图 + 历史趋势 + 预测 -->
       <section class="chart-card glass middle">
-        <h3><i class="fas fa-map-marked-alt"></i> 全球物流热力图</h3>
+        <!-- ✅ 修改 2：标题改为“物流热力图” -->
+        <h3><i class="fas fa-map-marked-alt"></i> 物流热力图</h3>
         <div id="map-chart" class="chart-box"></div>
 
         <div class="sub-charts">
-          <!-- 历史趋势折线图 -->
+          <!-- ✅ 修改 1：历史趋势改为近24小时 -->
           <div class="sub-chart">
-            <h4><i class="fas fa-history"></i> 历史趋势（近7天）</h4>
+            <h4><i class="fas fa-history"></i> 历史趋势（近24小时）</h4>
             <div id="history-chart" class="chart-box small"></div>
           </div>
 
@@ -137,52 +138,42 @@ const wsStatus = ref('connecting')
 const wsText = ref('连接中...')
 const wsIcon = ref('fa-spinner fa-spin')
 
-// ================== 城市 → 国家 映射表（关键） ==================
-const cityToCountry = {
-  // 美国城市（后端返回的主要城市）
-  'caguas': 'United States of America',
-  'dallas': 'United States of America',
-  'mount prospect': 'United States of America',
-  'mt. prospect': 'United States of America',
-  'wilkes barre': 'United States of America',
-  'wheaton': 'United States of America',
-  'tonawanda': 'United States of America',
-  'san ramon': 'United States of America',
-  'san jose': 'United States of America',
-  'salinas': 'United States of America',
-  'roseville': 'United States of America',
-  'rochester': 'United States of America',
-  'rancho cordova': 'United States of America',
-  'peabody': 'United States of America',
-  'paramount': 'United States of America',
-  'panorama city': 'United States of America',
-  'newark': 'United States of America',
-  'atlanta': 'United States of America',
-  'miami': 'United States of America',
-  'los angeles': 'United States of America',
-  'long beach': 'United States of America',
-  // 其他国家城市（备用）
-  'beijing': 'China',
-  'shanghai': 'China',
-  'guangzhou': 'China',
-  'tokyo': 'Japan',
-  'london': 'United Kingdom',
-  'paris': 'France',
-  'berlin': 'Germany',
-  'sydney': 'Australia',
-  'toronto': 'Canada',
-  'mexico city': 'Mexico',
-  'moscow': 'Russia',
-  'seoul': 'South Korea',
-  'singapore': 'Singapore',
-  'bangkok': 'Thailand',
-  'dubai': 'United Arab Emirates',
-  'sao paulo': 'Brazil',
-  'buenos aires': 'Argentina',
-  'johannesburg': 'South Africa',
-  'cairo': 'Egypt',
-  'delhi': 'India',
-  'mumbai': 'India'
+// ================== 城市 → 州/省 映射表（完整覆盖） ==================
+const cityToRegion = {
+  // 美国城市 → 州
+  'caguas': 'Puerto Rico',
+  'dallas': 'Texas',
+  'mount prospect': 'Illinois',
+  'mt. prospect': 'Illinois',
+  'wilkes barre': 'Pennsylvania',
+  'wheaton': 'Illinois',
+  'tonawanda': 'New York',
+  'san ramon': 'California',
+  'san jose': 'California',
+  'salinas': 'California',
+  'roseville': 'California',
+  'rochester': 'New York',
+  'rancho cordova': 'California',
+  'peabody': 'Massachusetts',
+  'paramount': 'California',
+  'panorama city': 'California',
+  'newark': 'New Jersey',
+  'atlanta': 'Georgia',
+  'miami': 'Florida',
+  'los angeles': 'California',
+  'long beach': 'California',
+  'freeport': 'Texas',
+  'detroit': 'Michigan',
+  'billings': 'Montana',
+  'canovanas': 'Puerto Rico',
+  // 加拿大城市 → 省
+  'ottawa': 'Ontario',
+  // 墨西哥城市 → 州
+  'tijuana': 'Baja California',
+  // 备用映射
+  'beijing': 'Beijing',
+  'shanghai': 'Shanghai',
+  'guangzhou': 'Guangdong'
 }
 
 // ================== WebSocket 连接 ==================
@@ -199,22 +190,23 @@ const connectWebSocket = () => {
   socket.onmessage = (event) => {
     const res = JSON.parse(event.data)
     console.log('收到数据:', res)
-    
     if (res.type === 'stats') {
-      // ========== 城市热度 → 国家热度（核心逻辑） ==========
+      // ========== 城市热度 → 州/省热度 ==========
       const rawHeatMap = Array.isArray(res.data.heatMap) ? res.data.heatMap : []
-      const countryAcc = {}
+      const regionAcc = {}
       
       rawHeatMap.forEach(item => {
         const cityKey = String(item.name || '').trim().toLowerCase()
-        const country = cityToCountry[cityKey] || 'Unknown'
-        if (country !== 'Unknown') {
-          countryAcc[country] = (countryAcc[country] || 0) + Math.max(Number(item.value) || 0, 0)
+        const region = cityToRegion[cityKey]
+        if (region) {
+          regionAcc[region] = (regionAcc[region] || 0) + Math.max(Number(item.value) || 0, 0)
+        } else {
+          console.warn('⚠️ 未找到对应州/省:', item.name)
         }
       })
 
-      const fixedHeatMap = Object.keys(countryAcc)
-        .map(name => ({ name, value: countryAcc[name] }))
+      const mapData = Object.keys(regionAcc)
+        .map(name => ({ name, value: regionAcc[name] }))
 
       // 更新 KPI
       stats.value = {
@@ -227,11 +219,40 @@ const connectWebSocket = () => {
       }
       
       // 更新热力图
-      if (fixedHeatMap.length > 0 && mapChart) {
-        console.log('✅ 热力图（归到国家）:', fixedHeatMap)
+      if (mapData.length > 0 && mapChart) {
+        console.log('✅ 热力图（归到州/省）:', mapData)
+        
+        // 使用平方根缩放，让小数值的差异更明显
+        const values = mapData.map(d => d.value)
+        const maxValue = Math.max(...values, 1)
+        const scaledData = mapData.map(item => ({
+          name: item.name,
+          value: Math.sqrt(item.value)
+        }))
+        const scaledMax = Math.sqrt(maxValue)
+        
         mapChart.setOption({
+          visualMap: {
+            min: 0,
+            max: scaledMax,
+            inRange: {
+              color: [
+                '#ffffff',   // 0 - 白色
+                '#ffcccc',   // 低 - 浅红
+                '#ff9999',   // 
+                '#ff6666',   // 中 - 中红
+                '#ff3333',   // 
+                '#cc0000',   // 高 - 深红
+                '#990000',   // 极高 - 暗红
+                '#660000'    // 极限 - 最深红
+              ]
+            },
+            outOfRange: {
+              color: '#ffffff'
+            }
+          },
           series: [{
-            data: fixedHeatMap
+            data: scaledData
           }]
         })
       }
@@ -270,16 +291,21 @@ const connectWebSocket = () => {
 // ================== 加载历史数据 ==================
 const loadHistoryData = async () => {
   try {
-    console.log('📈 加载历史数据...')
-    const response = await fetch('http://localhost:8000/api/v1/kpi/history?hours=24')
-    const data = await response.json()
-    
+    console.log('📈 加载历史趋势...')
+    // ✅ 明确请求 24 小时
+    const res = await fetch('http://localhost:8000/api/v1/kpi/history?hours=24')
+    const data = await res.json()
+
     console.log('📈 历史数据:', data)
-    
-    const buckets = data.items.map(item => item.bucket)
+
+    const buckets = data.items.map(item => {
+      const d = new Date(item.bucket)
+      return `${d.getMonth() + 1}-${d.getDate()} ${d.getHours()}:00`
+    })
+
     const orderCounts = data.items.map(item => item.order_count)
     const riskCounts = data.items.map(item => item.risk_count)
-    
+
     if (historyChart) {
       historyChart.setOption({
         xAxis: {
@@ -301,9 +327,10 @@ const loadHistoryData = async () => {
           }
         ]
       })
+      console.log('✅ 历史趋势渲染完成')
     }
-  } catch (error) {
-    console.error('❌ 历史数据加载失败:', error)
+  } catch (err) {
+    console.error('❌ 历史趋势加载失败:', err)
   }
 }
 
@@ -350,124 +377,155 @@ onMounted(() => {
     updatePieChart()
   }, { deep: true })
 
-  // 2. 全球物流热力地图（美国发货 → 全球收货）
+  // 2. 北美物流热力地图（保留所有优化）
   mapChart = echarts.init(document.getElementById('map-chart'))
 
-  fetch('/world.json')
+  fetch('/na-states.json')
     .then(res => {
-      if (!res.ok) throw new Error('world.json 加载失败，请确认文件在 public/ 目录下')
+      if (!res.ok) throw new Error('na-states.json 加载失败，请确认文件在 public/ 目录下')
       return res.json()
     })
     .then(geo => {
-      echarts.registerMap('world', geo)
+      echarts.registerMap('NA_STATES', geo)
       mapChart.setOption({
         backgroundColor: 'transparent',
-        tooltip: { trigger: 'item', formatter: p => `${p.name}<br/>发货热度: ${p.value ?? 0}` },
+        tooltip: {
+          trigger: 'item',
+          formatter: p => `${p.name}<br/>热度: ${p.value ? (p.value * p.value).toFixed(0) : 0}`
+        },
         visualMap: {
           min: 0,
-          max: 5000,
+          max: 10, // 初始值，会被动态更新
           left: 'left',
           bottom: 10,
           text: ['高', '低'],
           textStyle: { color: '#ccc' },
           calculable: true,
+          // 强烈的颜色梯度
           inRange: {
-            color: ['#ffffff', '#ffe6e6', '#ffb3b3', '#ff6666', '#cc0000']
+            color: [
+              '#ffffff',   // 0 - 白色
+              '#ffcccc',   // 1 - 浅红
+              '#ff9999',   // 2
+              '#ff6666',   // 3 - 中红
+              '#ff3333',   // 4
+              '#cc0000',   // 5 - 深红
+              '#990000',   // 6 - 暗红
+              '#660000'    // 7+ - 最深红
+            ]
+          },
+          outOfRange: {
+            color: '#ffffff'
           }
         },
         geo: {
-          map: 'world',
+          map: 'NA_STATES',
           roam: true,
-          zoom: 1.1,
-          center: [-98, 38],
-          silent: false,
+          zoom: 1.5,
+          center: [-100, 40],
           itemStyle: {
-            areaColor: '#ffffff',
+            areaColor: '#ffffff',  // 无热度区域为白色
             borderColor: '#cccccc',
-            borderWidth: 0.5
+            borderWidth: 0.5,
+            shadowColor: 'rgba(0, 0, 0, 0.1)',
+            shadowBlur: 2
           },
           emphasis: {
             itemStyle: {
-              areaColor: '#ffcccc',
-              shadowBlur: 10,
-              shadowColor: 'rgba(255,0,0,0.3)'
-            },
-            label: { show: true, color: '#990000', fontSize: 11 }
-          },
-          regions: [{
-            name: 'United States of America',
-            itemStyle: {
-              areaColor: '#cc0000',
-              shadowBlur: 15,
-              shadowColor: 'rgba(255,0,0,0.5)',
-              borderColor: '#ff3333',
-              borderWidth: 1.2
-            },
-            label: { show: true, color: '#ffffff', fontSize: 12, fontWeight: 'bold' }
-          }]
+              areaColor: '#f0f0f0',
+              shadowColor: 'rgba(255, 100, 100, 0.5)',
+              shadowBlur: 10
+            }
+          }
         },
         series: [{
-          name: '全球收货热度',
+          name: '物流热度',
           type: 'map',
-          map: 'world',
+          map: 'NA_STATES',
           geoIndex: 0,
           data: [],
-          emphasis: { itemStyle: { shadowBlur: 10, shadowColor: '#ff0000' } }
+          selectedMode: false,
+          emphasis: {
+            itemStyle: {
+              shadowBlur: 20,
+              shadowColor: 'rgba(255, 50, 50, 0.8)',
+              borderColor: '#ff3333',
+              borderWidth: 2,
+            },
+            label: {
+              show: true,
+              color: '#fff',
+              fontSize: 12,
+              fontWeight: 'bold'
+            }
+          }
         }]
       })
     })
     .catch(err => {
-      console.error('🌍 世界地图加载失败:', err.message)
+      console.error('🌍 北美地图加载失败:', err.message)
     })
 
   // 3. 历史趋势折线图
-  historyChart = echarts.init(document.getElementById('history-chart'))
-  historyChart.setOption({
-    tooltip: { trigger: 'axis' },
-    legend: { top: 0, textStyle: { color: '#aaa' } },
-    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: [],
-      axisLine: { lineStyle: { color: '#555' } },
-      axisLabel: { color: '#aaa' }
-    },
-    yAxis: {
-      type: 'value',
-      axisLine: { lineStyle: { color: '#555' } },
-      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
-      axisLabel: { color: '#aaa' }
-    },
-    series: [
-      {
-        name: '出货量',
-        type: 'line',
-        smooth: true,
+  setTimeout(() => {
+    const el = document.getElementById('history-chart')
+    if (!el) {
+      console.error('❌ history-chart DOM 不存在')
+      return
+    }
+
+    historyChart = echarts.init(el)
+
+    historyChart.setOption({
+      tooltip: { trigger: 'axis' },
+      legend: { top: 0, textStyle: { color: '#aaa' } },
+      grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        boundaryGap: false,
         data: [],
-        lineStyle: { color: '#91cc75', width: 3 },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(145, 204, 117, 0.5)' },
-            { offset: 1, color: 'rgba(145, 204, 117, 0.1)' }
-          ])
-        }
+        axisLine: { lineStyle: { color: '#555' } },
+        axisLabel: { color: '#aaa' }
       },
-      {
-        name: '进货量',
-        type: 'line',
-        smooth: true,
-        data: [],
-        lineStyle: { color: '#5470c6', width: 3 },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(84, 112, 198, 0.5)' },
-            { offset: 1, color: 'rgba(84, 112, 198, 0.1)' }
-          ])
+      yAxis: {
+        type: 'value',
+        axisLine: { lineStyle: { color: '#555' } },
+        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+        axisLabel: { color: '#aaa' }
+      },
+      series: [
+        {
+          name: '出货量',
+          type: 'line',
+          smooth: true,
+          data: [],
+          lineStyle: { color: '#91cc75', width: 3 },
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: 'rgba(145, 204, 117, 0.5)' },
+              { offset: 1, color: 'rgba(145, 204, 117, 0.1)' }
+            ])
+          }
+        },
+        {
+          name: '进货量',
+          type: 'line',
+          smooth: true,
+          data: [],
+          lineStyle: { color: '#5470c6', width: 3 },
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: 'rgba(84, 112, 198, 0.5)' },
+              { offset: 1, color: 'rgba(84, 112, 198, 0.1)' }
+            ])
+          }
         }
-      }
-    ]
-  })
+      ]
+    })
+
+    historyChart.resize()
+    loadHistoryData()
+  }, 300)
 
   // 4. 未来成交预测
   forecastChart = echarts.init(document.getElementById('forecast-chart'))
