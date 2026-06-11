@@ -178,7 +178,9 @@ const cityToRegion = {
 
 // ================== WebSocket 连接 ==================
 const connectWebSocket = () => {
-  socket = new WebSocket('ws://localhost:8000/api/v1/ws/alerts')
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = window.location.host
+  socket = new WebSocket(`${protocol}//${host}/api/v1/ws/alerts`)
 
   socket.onopen = () => {
     wsStatus.value = 'connected'
@@ -293,7 +295,7 @@ const loadHistoryData = async () => {
   try {
     console.log('📈 加载历史趋势...')
     // ✅ 明确请求 24 小时
-    const res = await fetch('http://localhost:8000/api/v1/kpi/history?hours=24')
+    const res = await fetch('/api/v1/kpi/history?hours=24')
     const data = await res.json()
 
     console.log('📈 历史数据:', data)

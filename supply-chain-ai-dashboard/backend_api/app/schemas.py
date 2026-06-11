@@ -107,6 +107,8 @@ class KPIResponse(BaseModel):
     riskCount: int = 0
     delayRate: float = 0
     heatMap: list[dict[str, Any]] = Field(default_factory=list)
+    orderStatus: list[dict[str, Any]] = Field(default_factory=list)
+
 
 
 class HistoryPoint(BaseModel):

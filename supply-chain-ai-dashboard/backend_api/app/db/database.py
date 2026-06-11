@@ -155,6 +155,31 @@ def get_realtime_kpi(session: Session) -> KPIResponse:
     ).all()
     heat_map = [{"name": row[0], "value": int(row[1])} for row in heat_rows if row[0]]
 
+    # 计算订单状态分布 (已完成/运输中/待发货)
+    status_counts: dict[str, int] = defaultdict(int)
+    status_rows = session.execute(
+        select(OrderRecord.delivery_status, func.count(OrderRecord.id))
+        .group_by(OrderRecord.delivery_status)
+    ).all()
+
+    for status, count in status_rows:
+        if not status:
+            status_counts["待发货"] += int(count)
+            continue
+        status_lower = str(status).lower()
+        if "on time" in status_lower or "advance" in status_lower:
+            status_counts["已完成"] += int(count)
+        elif "late" in status_lower:
+            status_counts["运输中"] += int(count)
+        else:
+            status_counts["待发货"] += int(count)
+
+    order_status = [
+        {"value": status_counts["已完成"], "name": "已完成", "itemStyle": {"color": "#91cc75"}},
+        {"value": status_counts["运输中"], "name": "运输中", "itemStyle": {"color": "#5470c6"}},
+        {"value": status_counts["待发货"], "name": "待发货", "itemStyle": {"color": "#fac858"}},
+    ]
+
     return KPIResponse(
         totalOrders=int(total_orders),
         gmv=float(total_gmv),
@@ -162,7 +187,9 @@ def get_realtime_kpi(session: Session) -> KPIResponse:
         riskCount=int(risk_count),
         delayRate=round(delay_rate, 2),
         heatMap=heat_map,
+        orderStatus=order_status,
     )
+
 
 
 def get_history(session: Session, hours: int = 24) -> list[HistoryPoint]:
