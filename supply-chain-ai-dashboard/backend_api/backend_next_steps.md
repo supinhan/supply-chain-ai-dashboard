@@ -5,6 +5,7 @@
 - FastAPI 主服务入口：`backend_api/app/main.py`，旧入口 `backend_api/main.py` 保留兼容。
 - API 路由层：`backend_api/app/api/routes.py`
 - 配置层：`backend_api/app/core/config.py`
+- 接口安全工具：`backend_api/app/core/security.py`
 - 数据模型与数据库访问层：`backend_api/app/db/database.py`
 - AI 推理适配层：`backend_api/app/services/model_runner.py`
 - Redis 缓存与 Pub/Sub 适配层：`backend_api/app/services/cache.py`
@@ -24,29 +25,39 @@
 
 ## 3. 下一步开发任务
 
-### P0 必须完成
+### 已完成的二轮对接
 
-- 数据回放联调：完成 `data_producer/replay_script.py`，读取 DataCo CSV 后 POST 到 `/api/v1/stream/ingest`。
-- AI 服务联调：确认独立 AI 微服务 `/predict/risk` 入参/出参与主后端 `model_runner.py` 一致。
-- 前端 WebSocket 联调：当前已改为自动连接当前站点 `/api/v1/ws/alerts`，下一步需要和真实后端广播做端到端验证。
-- 数据库验收：用 MySQL 启动后验证 `orders`、`alerts` 表自动建表和写入。
-- 端到端演示链路：CSV 回放 -> 后端入库 -> AI 打分 -> 高风险告警 -> 前端列表闪烁。
+- 数据回放脚本已支持读取 DataCo CSV、字段裁剪、失败重试、指数退避、断点续跑和失败订单日志。
+- AI 风险评分已支持远程 AI 服务优先、失败时本地模型/启发式 fallback。
+- 高风险告警已保存 XAI 归因到 `alerts.detail`，并通过 REST 与 WebSocket 返回给前端。
+- `/api/v1/forecast` 已完成，优先调用 AI 服务，失败时使用后端历史数据生成 7 天 fallback。
+- DataCo 目的地、订单状态、数量、计划运输天数字段已映射、入库，并用于 KPI 和热力图聚合。
+- 后端测试已覆盖字段映射、订单入库、热力图聚合、XAI 告警和 forecast fallback。
+
+### P0 当前优先级
+
+- 接口安全：已加入数据回放 -> 后端 ingest、后端 -> AI 服务的 API key/HMAC 签名能力；下一步是为生产环境生成强随机密钥并做 Docker 端到端验收。
+- Docker 启动验收：在干净环境执行 `docker compose up -d --build`，确认 MySQL、Redis、AI 服务、后端、前端全部健康。
+- 数据回放端到端验收：执行 `docker compose --profile replay up data-replay --build`，确认 CSV 回放 -> 后端入库 -> AI 打分 -> 高风险告警 -> 前端更新。
 
 ### P1 应尽快补齐
 
+- 登录与鉴权：新增用户表、登录接口、JWT/session 鉴权依赖，前端未登录跳转 `/login`。
+- 可靠投递：引入服务端 ACK、幂等投递审计、本地 pending 队列重放，以及失败订单人工/自动重放流程。
 - Redis KPI 缓存：当前已写入 `kpi:realtime:dashboard`，后续需将读取链路改为优先读 Redis、失效时回源 MySQL。
 - Redis Pub/Sub：当前已发布到 `alerts:channel`，后续需补后台订阅任务，支持多 Worker 或多实例广播。
 - 告警确认接口：新增 `PATCH /api/v1/alerts/{id}/ack`，支撑 Alert 状态流转。
 - 物流热力图接口：新增当前在途订单的线路/节点 API，给 ECharts 地图使用。
-- API 自动化测试：覆盖 ingest、kpi、history、alerts、WebSocket 基础连接。
-- Docker 启动验收：在干净环境执行 `docker compose up -d --build`，确认 5 个核心服务健康。
+- API 自动化测试：继续补充 WebSocket 基础连接、鉴权失败、可靠投递和告警状态流转测试。
+- 数据库迁移治理：接入 Alembic，替代 `create_all` 与启动时手写补列。
 
 ### P2 增强项
 
 - 历史趋势按业务订单时间聚合，而不是按后端接收时间聚合。
+- Forecast fallback 改为按业务订单时间、销售额和数量聚合，不只按接收时间订单数均值。
 - 增加限流、批量注入接口和错误数据落库表。
 - 增加结构化日志、请求追踪 ID、基础 Prometheus 指标。
-- 将前端需要的 forecast 数据从静态 mock 改成后端/AI 服务接口。
+- 如果部署条件允许，进一步加入 HTTPS、mTLS 或安全隧道，减少明文内网传输风险。
 
 ## 4. 与其他角色对接方式
 

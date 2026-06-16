@@ -60,7 +60,24 @@ docker compose down -v
 - 后端通过 `AI_SERVICE_URL=http://ai-service:8000` 调用 AI 服务。
 - 数据回放容器通过 `BACKEND_INGEST_URL=http://backend-api:8000/api/v1/stream/ingest` 注入订单。
 
-## 5. 后端本地开发
+## 5. 接口安全配置
+
+默认 `.env.example` 中安全密钥留空，便于本地开发和课堂演示快速启动。部署到共享网络或需要验收安全项时，建议至少配置：
+
+```bash
+INGEST_API_KEY=replace-with-replay-client-key
+INGEST_HMAC_SECRET=replace-with-long-random-replay-secret
+AI_SERVICE_API_KEY=replace-with-backend-client-key
+AI_SERVICE_HMAC_SECRET=replace-with-long-random-ai-secret
+REQUEST_SIGNATURE_MAX_AGE_SECONDS=300
+```
+
+- `INGEST_API_KEY` / `INGEST_HMAC_SECRET`：保护数据回放到后端 `POST /api/v1/stream/ingest`。
+- `AI_SERVICE_API_KEY` / `AI_SERVICE_HMAC_SECRET`：保护后端到 AI 服务 `/predict/risk` 和 `/api/v1/forecast`。
+- 客户端会发送 `X-SCAI-API-Key`、`X-SCAI-Timestamp`、`X-SCAI-Signature`。签名覆盖 HTTP 方法、路径与查询串、时间戳和请求体 SHA256。
+- 密钥留空时对应校验关闭；配置 API key 时校验 key；配置 HMAC secret 时额外校验签名和时间窗口。
+
+## 6. 后端本地开发
 
 不使用 Docker 时，后端默认使用 `backend_api/dev.db` 作为 SQLite 开发库，便于本地快速调试。
 
@@ -71,7 +88,7 @@ pip install -r backend_api/requirements.txt
 uvicorn backend_api.app.main:app --reload --port 8000
 ```
 
-## 6. 前端本地开发
+## 7. 前端本地开发
 
 Vite 已配置 `/api` 代理到本地后端 `http://localhost:8000`，WebSocket 也走同一个 `/api/v1/ws/alerts` 路径。
 

@@ -13,12 +13,17 @@ FIELD_ALIASES = {
     "Delivery Status": "delivery_status",
     "Customer City": "customer_city",
     "Customer Country": "customer_country",
+    "Order City": "order_city",
+    "Order Country": "order_country",
+    "Order Status": "order_status",
     "Latitude": "latitude",
     "Longitude": "longitude",
     "Category Name": "product_category",
     "Product Name": "product_name",
     "Order Item Total": "order_amount",
     "Sales": "order_amount",
+    "Order Item Quantity": "order_quantity",
+    "Days for shipment (scheduled)": "scheduled_days",
     "Order Item Profit Ratio": "profit_ratio",
     "Order Profit Per Order": "order_profit",
     "Late_delivery_risk": "late_delivery_risk",
@@ -34,11 +39,16 @@ class OrderIngestRequest(BaseModel):
     delivery_status: str | None = Field(default=None, max_length=64)
     customer_city: str | None = Field(default=None, max_length=128)
     customer_country: str | None = Field(default=None, max_length=128)
+    order_city: str | None = Field(default=None, max_length=128)
+    order_country: str | None = Field(default=None, max_length=128)
+    order_status: str | None = Field(default=None, max_length=64)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     product_category: str | None = Field(default=None, max_length=128)
     product_name: str | None = Field(default=None, max_length=256)
     order_amount: float = Field(default=0, ge=0)
+    order_quantity: int | None = Field(default=None, ge=0)
+    scheduled_days: float | None = Field(default=None, ge=0)
     profit_ratio: float | None = Field(default=None, ge=-10, le=10)
     order_profit: float | None = None
     late_delivery_risk: bool | None = None
@@ -88,7 +98,7 @@ class RiskPrediction(BaseModel):
     risk_score: float = Field(ge=0, le=1)
     is_high_risk: bool
     risk_type: str = "高延迟风险"
-    xai_analysis: dict[str, float] = Field(default_factory=dict)
+    xai_analysis: dict[str, Any] = Field(default_factory=dict)
 
 
 class AlertResponse(BaseModel):
@@ -98,6 +108,7 @@ class AlertResponse(BaseModel):
     probability: float
     status: int = 0
     timestamp: datetime
+    xai_analysis: dict[str, Any] = Field(default_factory=dict)
 
 
 class KPIResponse(BaseModel):
@@ -107,7 +118,19 @@ class KPIResponse(BaseModel):
     riskCount: int = 0
     delayRate: float = 0
     heatMap: list[dict[str, Any]] = Field(default_factory=list)
+    regionHeatMap: list[dict[str, Any]] = Field(default_factory=list)
+    heatMapMeta: dict[str, Any] = Field(default_factory=dict)
     orderStatus: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ForecastResponse(BaseModel):
+    days: list[str] = Field(default_factory=list)
+    values: list[float] = Field(default_factory=list)
+    daily_forecast_series: list[dict[str, Any]] = Field(default_factory=list)
+    total_predicted_sales_aggregate: float = 0
+    avg_daily_sales_volume: float = 0
+    trend_direction: str = "平稳波动/周期回调"
+    source: str = "fallback"
 
 
 

@@ -41,6 +41,11 @@ class Settings:
     )
     risk_threshold: float = float(os.getenv("RISK_THRESHOLD", "0.85"))
     request_timeout_seconds: float = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "3.0"))
+    request_signature_max_age_seconds: int = int(os.getenv("REQUEST_SIGNATURE_MAX_AGE_SECONDS", "300"))
+    ingest_api_key: str = os.getenv("INGEST_API_KEY", "")
+    ingest_hmac_secret: str = os.getenv("INGEST_HMAC_SECRET", "")
+    ai_service_api_key: str = os.getenv("AI_SERVICE_API_KEY", "")
+    ai_service_hmac_secret: str = os.getenv("AI_SERVICE_HMAC_SECRET", "")
 
     allowed_origins: list[str] = None  # type: ignore[assignment]
 

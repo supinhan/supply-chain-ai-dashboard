@@ -1,14 +1,22 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+import hashlib
+import hmac
 import joblib
 import pandas as pd
 import numpy as np
 import os
+import time
 
 ml_models = {}
+
+API_KEY_HEADER = "X-SCAI-API-Key"
+TIMESTAMP_HEADER = "X-SCAI-Timestamp"
+SIGNATURE_HEADER = "X-SCAI-Signature"
+SIGNATURE_VERSION = "v1"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -55,6 +63,49 @@ class ForecastInput(BaseModel):
     shipping_mode: Optional[str] = "Standard Class"
     order_city: Optional[str] = None
     category: Optional[str] = None
+
+def path_with_query(request: Request):
+    query = request.scope.get("query_string", b"").decode("latin-1")
+    return f"{request.url.path}?{query}" if query else request.url.path
+
+def build_signature(method, path_query, body, timestamp, secret):
+    body_hash = hashlib.sha256(body).hexdigest()
+    canonical = "\n".join([SIGNATURE_VERSION, method.upper(), path_query, timestamp, body_hash])
+    digest = hmac.new(secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{SIGNATURE_VERSION}={digest}"
+
+async def verify_service_auth(request: Request):
+    expected_api_key = os.getenv("AI_SERVICE_API_KEY", "")
+    hmac_secret = os.getenv("AI_SERVICE_HMAC_SECRET", "")
+    if not expected_api_key and not hmac_secret:
+        return
+
+    if expected_api_key:
+        provided_api_key = request.headers.get(API_KEY_HEADER)
+        if not provided_api_key or not hmac.compare_digest(provided_api_key, expected_api_key):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
+    if not hmac_secret:
+        return
+
+    timestamp = request.headers.get(TIMESTAMP_HEADER)
+    provided_signature = request.headers.get(SIGNATURE_HEADER)
+    if not timestamp or not provided_signature:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing request signature")
+
+    try:
+        timestamp_seconds = int(float(timestamp))
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature timestamp")
+
+    max_age_seconds = int(os.getenv("REQUEST_SIGNATURE_MAX_AGE_SECONDS", "300"))
+    if max_age_seconds > 0 and abs(time.time() - timestamp_seconds) > max_age_seconds:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Expired request signature")
+
+    body = await request.body()
+    expected_signature = build_signature(request.method, path_with_query(request), body, timestamp, hmac_secret)
+    if not hmac.compare_digest(provided_signature, expected_signature):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid request signature")
 
 CITY_WEALTH_MAP = {
     'San Jose': 0.98, 'San Francisco': 0.97, 'Seattle': 0.95, 'New York': 0.94,
@@ -120,7 +171,7 @@ def build_full_feature_row(
     return pd.DataFrame([row])
 
 @app.post("/predict/risk", summary="在线订单风险拦截与可解释性归因分析")
-async def predict_risk(data: OrderInput):
+async def predict_risk(data: OrderInput, _: None = Depends(verify_service_auth)):
     if "risk" not in ml_models:
         raise HTTPException(status_code=500, detail="风险大脑模型未正常装载")
 
@@ -194,7 +245,8 @@ async def forecast_7days(
     order_quantity: int = 1,
     shipping_mode: str = "Standard Class",
     order_city: Optional[str] = None,
-    category: Optional[str] = None
+    category: Optional[str] = None,
+    _: None = Depends(verify_service_auth)
 ):
     if "sales" not in ml_models:
         raise HTTPException(status_code=500, detail="时序销量回归预测大脑尚未苏醒")
@@ -252,7 +304,7 @@ async def forecast_7days(
     }
 
 @app.post("/predict/forecast", summary="未来7天销量预测（面向后端调用的 POST 强契约版）")
-async def forecast_post(data: ForecastInput):
+async def forecast_post(data: ForecastInput, _: None = Depends(verify_service_auth)):
     return await forecast_7days(
         order_amount=data.order_amount,
         order_quantity=data.order_quantity,

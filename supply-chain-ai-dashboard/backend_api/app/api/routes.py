@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
+from ..core.security import RequestAuthError, verify_request_auth
 from ..db.database import (
     alert_to_response,
+    build_forecast_fallback,
     create_alert,
     get_history,
     get_recent_alerts,
@@ -13,7 +15,7 @@ from ..db.database import (
     get_session,
     upsert_order,
 )
-from ..schemas import IngestResponse, KPIResponse, OrderIngestRequest
+from ..schemas import ForecastResponse, IngestResponse, KPIResponse, OrderIngestRequest
 from ..services.cache import cache_client
 from ..services.model_runner import risk_model_runner
 from ..ws.manager import websocket_manager
@@ -22,9 +24,31 @@ from ..ws.manager import websocket_manager
 router = APIRouter(prefix=settings.api_prefix)
 
 
+def _path_with_query(request: Request) -> str:
+    query = request.scope.get("query_string", b"").decode("latin-1")
+    return f"{request.url.path}?{query}" if query else request.url.path
+
+
+async def verify_ingest_auth(request: Request) -> None:
+    body = await request.body()
+    try:
+        verify_request_auth(
+            request.method,
+            _path_with_query(request),
+            body,
+            request.headers,
+            expected_api_key=settings.ingest_api_key,
+            secret=settings.ingest_hmac_secret,
+            max_age_seconds=settings.request_signature_max_age_seconds,
+        )
+    except RequestAuthError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+
 @router.post("/stream/ingest", response_model=IngestResponse)
 async def ingest_order(
     payload: OrderIngestRequest,
+    _: None = Depends(verify_ingest_auth),
     session: Session = Depends(get_session),
 ) -> IngestResponse:
     prediction = await risk_model_runner.predict(payload)
@@ -37,7 +61,7 @@ async def ingest_order(
             order_id=payload.order_id,
             risk_type=prediction.risk_type,
             probability=prediction.risk_score,
-            detail=str(prediction.xai_analysis),
+            xai_analysis=prediction.xai_analysis,
         )
         alert_payload = alert_to_response(alert)
         alert_message = {
@@ -50,6 +74,7 @@ async def ingest_order(
                 "level": "danger",
                 "icon": "fas fa-exclamation-circle",
                 "timestamp": alert_payload.timestamp.isoformat(),
+                "xai_analysis": alert_payload.xai_analysis,
             },
         }
         await cache_client.publish_alert(alert_message)
@@ -79,6 +104,25 @@ async def kpi_history(
     return {"hours": hours, "items": [item.model_dump() for item in get_history(session, hours)]}
 
 
+@router.get("/forecast", response_model=ForecastResponse)
+async def forecast(
+    order_amount: float = Query(default=100.0, ge=0),
+    order_quantity: int = Query(default=1, ge=0),
+    shipping_mode: str = Query(default="Standard Class", max_length=64),
+    order_city: str | None = Query(default=None, max_length=128),
+    category: str | None = Query(default=None, max_length=128),
+    session: Session = Depends(get_session),
+) -> ForecastResponse:
+    remote_forecast = await risk_model_runner.forecast(
+        order_amount=order_amount,
+        order_quantity=order_quantity,
+        shipping_mode=shipping_mode,
+        order_city=order_city,
+        category=category,
+    )
+    return remote_forecast or build_forecast_fallback(session)
+
+
 @router.get("/alerts/recent")
 async def recent_alerts(
     limit: int = Query(default=50, ge=1, le=200),
@@ -105,6 +149,7 @@ async def alerts_socket(websocket: WebSocket) -> None:
                         "level": "danger",
                         "icon": "fas fa-exclamation-circle",
                         "timestamp": alert.timestamp.isoformat(),
+                        "xai_analysis": alert.xai_analysis,
                     },
                 }
             )

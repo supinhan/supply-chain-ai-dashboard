@@ -52,6 +52,7 @@ docker-compose.override.yml
 # Temporary files
 tmp/
 temp/
+runtime/
 *.tmp
 *.bak
 *.swp

@@ -154,14 +154,238 @@ let mapChart = null
 let pieChart = null
 let historyChart = null
 let forecastChart = null
+let reconnectTimer = null
+let reconnectAttempts = 0
+let shouldReconnect = true
+let pendingStatsData = null
+const registeredMaps = new Set()
 
 // WebSocket 状态显示
 const wsStatus = ref('connecting')
 const wsText = ref('连接中...')
 const wsIcon = ref('fa-spinner fa-spin')
 
+// ================== KPI 与地图渲染 ==================
+const buildMapPayload = (data) => {
+  const rawHeatMap = Array.isArray(data?.heatMap) ? data.heatMap : []
+  const backendRegionHeatMap = Array.isArray(data?.regionHeatMap) ? data.regionHeatMap : []
+  const usData = []
+  const worldData = []
+
+  let mapType = data?.heatMapMeta?.mapType || 'NA_STATES'
+  let mapData = backendRegionHeatMap
+
+  if (mapData.length === 0) {
+    rawHeatMap.forEach(item => {
+      const cityKey = String(item.name || '').trim().toLowerCase()
+      const region = cityToRegion[cityKey]
+
+      if (!region) {
+        console.warn('未找到对应区域:', item.name)
+        return
+      }
+
+      const value = Math.max(Number(item.value) || 0, 0)
+      if (usStates.has(region)) {
+        usData.push({ name: region, value })
+      } else {
+        worldData.push({ name: region, value })
+      }
+    })
+
+    mapType = 'NA_STATES'
+    mapData = usData
+
+    if (worldData.length > 0) {
+      mapType = 'WORLD'
+      const usTotal = usData.reduce((sum, item) => sum + item.value, 0)
+      if (usTotal > 0) {
+        worldData.push({ name: 'United States', value: usTotal })
+      }
+      mapData = worldData
+    }
+  }
+
+  return { mapType, mapData }
+}
+
+const renderHeatMap = (data) => {
+  pendingStatsData = data
+  if (!mapChart) return
+
+  const { mapType, mapData } = buildMapPayload(data)
+  if (!registeredMaps.has(mapType)) {
+    console.warn(`地图 ${mapType} 尚未注册，等待 GeoJSON 加载完成后渲染`)
+    return
+  }
+
+  if (mapData.length === 0) {
+    mapChart.clear()
+    return
+  }
+
+  const values = mapData.map(d => d.value)
+  const maxValue = Math.max(...values, 1)
+  const scaledData = mapData.map(item => ({
+    name: item.name,
+    value: Math.sqrt(Math.max(Number(item.value) || 0, 0))
+  }))
+  const scaledMax = Math.sqrt(maxValue)
+
+  let center = [-100, 40]
+  let zoom = 1.5
+
+  if (mapType === 'WORLD') {
+    center = [0, 20]
+    zoom = 1.2
+  }
+
+  mapChart.setOption({
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'item',
+      formatter: p => `${p.name}<br/>热度: ${p.value ? (p.value * p.value).toFixed(0) : 0}`
+    },
+    visualMap: {
+      min: 0,
+      max: scaledMax,
+      left: 'left',
+      bottom: 10,
+      text: ['高', '低'],
+      textStyle: { color: '#ccc' },
+      calculable: true,
+      inRange: {
+        color: [
+          '#ffffff', '#ffcccc', '#ff9999', '#ff6666',
+          '#ff3333', '#cc0000', '#990000', '#660000'
+        ]
+      },
+      outOfRange: { color: '#ffffff' }
+    },
+    geo: {
+      map: mapType,
+      roam: true,
+      zoom: zoom,
+      center: center,
+      itemStyle: {
+        areaColor: '#ffffff',
+        borderColor: '#cccccc',
+        borderWidth: 0.5
+      },
+      emphasis: {
+        itemStyle: {
+          areaColor: '#f0f0f0',
+          shadowColor: 'rgba(255, 100, 100, 0.5)',
+          shadowBlur: 10
+        }
+      }
+    },
+    series: [{
+      name: '物流热度',
+      type: 'map',
+      map: mapType,
+      geoIndex: 0,
+      data: scaledData,
+      emphasis: {
+        itemStyle: {
+          shadowBlur: 20,
+          shadowColor: 'rgba(255, 50, 50, 0.8)',
+          borderColor: '#ff3333',
+          borderWidth: 2,
+        },
+        label: {
+          show: true,
+          color: '#fff',
+          fontSize: 12,
+          fontWeight: 'bold'
+        }
+      }
+    }]
+  })
+}
+
+const applyStatsData = (data) => {
+  if (!data) return
+  renderHeatMap(data)
+  stats.value = {
+    totalOrders: data.totalOrders || 0,
+    gmv: data.gmv || 0,
+    otdRate: data.otdRate || 0,
+    riskCount: data.riskCount || 0,
+    delayRate: data.delayRate || 0,
+    orderStatus: data.orderStatus || stats.value.orderStatus
+  }
+}
+
+const loadRealtimeKpi = async () => {
+  try {
+    const res = await fetch('/api/v1/kpi/realtime')
+    if (!res.ok) throw new Error(`KPI 请求失败: ${res.status}`)
+    const data = await res.json()
+    applyStatsData(data)
+  } catch (err) {
+    console.error('实时 KPI 加载失败:', err)
+  }
+}
+
+const loadRecentAlerts = async () => {
+  try {
+    const res = await fetch('/api/v1/alerts/recent?limit=5')
+    if (!res.ok) throw new Error(`最近告警请求失败: ${res.status}`)
+    const data = await res.json()
+    warningList.value = (Array.isArray(data.items) ? data.items : []).map(item => ({
+      id: item.id,
+      orderId: item.order_id,
+      riskType: item.risk_type,
+      probability: item.probability,
+      level: 'danger',
+      icon: 'fas fa-exclamation-circle',
+      timestamp: item.timestamp,
+      xaiAnalysis: item.xai_analysis || {}
+    }))
+  } catch (err) {
+    console.error('最近告警加载失败:', err)
+  }
+}
+
+const addAlertItem = (data) => {
+  if (!data) return
+  const alertId = data.id
+  if (alertId !== undefined && warningList.value.some(item => item.id === alertId)) return
+
+  warningList.value.unshift({
+    id: alertId,
+    orderId: data.orderId,
+    riskType: data.riskType,
+    probability: data.probability,
+    level: data.level || 'danger',
+    icon: data.icon || 'fas fa-exclamation-circle',
+    timestamp: data.timestamp,
+    xaiAnalysis: data.xai_analysis || {}
+  })
+  if (warningList.value.length > 5) {
+    warningList.value.pop()
+  }
+}
+
+const scheduleReconnect = () => {
+  if (!shouldReconnect) return
+  if (reconnectTimer) window.clearTimeout(reconnectTimer)
+
+  reconnectAttempts += 1
+  const delay = Math.min(30000, 1000 * (2 ** Math.min(reconnectAttempts - 1, 5)))
+  wsStatus.value = 'connecting'
+  wsText.value = `${Math.ceil(delay / 1000)}秒后重连`
+  wsIcon.value = 'fa-spinner fa-spin'
+  reconnectTimer = window.setTimeout(() => {
+    connectWebSocket()
+  }, delay)
+}
+
 // ================== WebSocket 连接 ==================
 const connectWebSocket = () => {
+  if (socket && socket.readyState === WebSocket.OPEN) return
+
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
   socket = new WebSocket(`${protocol}//${host}/api/v1/ws/alerts`)
@@ -170,6 +394,11 @@ const connectWebSocket = () => {
     wsStatus.value = 'connected'
     wsText.value = '实时同步中'
     wsIcon.value = 'fa-circle'
+    reconnectAttempts = 0
+    if (reconnectTimer) {
+      window.clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     console.log('WebSocket 连接成功')
   }
 
@@ -178,151 +407,10 @@ const connectWebSocket = () => {
     console.log('收到数据:', res)
     
     if (res.type === 'stats') {
-      const rawHeatMap = Array.isArray(res.data.heatMap) ? res.data.heatMap : []
-      
-      // ✅ 按地图类型分类数据
-      const usData = []
-      const worldData = []
-      
-      rawHeatMap.forEach(item => {
-        const cityKey = String(item.name || '').trim().toLowerCase()
-        const region = cityToRegion[cityKey]  // 使用导入的映射表
-        
-        if (!region) {
-          console.warn('⚠️ 未找到对应区域:', item.name)
-          return
-        }
-        
-        const value = Math.max(Number(item.value) || 0, 0)
-        
-        // 判断是美国州还是非美国国家
-        if (usStates.has(region)) {  // 使用导入的 usStates
-          usData.push({ name: region, value })
-        } else {
-          worldData.push({ name: region, value })
-        }
-      })
-      
-      // 决定用哪张底图
-      let mapType = 'NA_STATES'
-      let mapData = usData
-      
-      if (worldData.length > 0) {
-        mapType = 'WORLD'
-        const usTotal = usData.reduce((sum, item) => sum + item.value, 0)
-        if (usTotal > 0) {
-          worldData.push({ name: 'United States', value: usTotal })
-        }
-        mapData = worldData
-      }
-      
-      // 更新热力图
-      if (mapData.length > 0 && mapChart) {
-        const values = mapData.map(d => d.value)
-        const maxValue = Math.max(...values, 1)
-        const scaledData = mapData.map(item => ({
-          name: item.name,
-          value: Math.sqrt(item.value)
-        }))
-        const scaledMax = Math.sqrt(maxValue)
-        
-        let center = [-100, 40]
-        let zoom = 1.5
-        
-        if (mapType === 'WORLD') {
-          center = [0, 20]
-          zoom = 1.2
-        }
-        
-        mapChart.setOption({
-          backgroundColor: 'transparent',
-          tooltip: {
-            trigger: 'item',
-            formatter: p => `${p.name}<br/>热度: ${p.value ? (p.value * p.value).toFixed(0) : 0}`
-          },
-          visualMap: {
-            min: 0,
-            max: scaledMax,
-            left: 'left',
-            bottom: 10,
-            text: ['高', '低'],
-            textStyle: { color: '#ccc' },
-            calculable: true,
-            inRange: {
-              color: [
-                '#ffffff', '#ffcccc', '#ff9999', '#ff6666',
-                '#ff3333', '#cc0000', '#990000', '#660000'
-              ]
-            },
-            outOfRange: { color: '#ffffff' }
-          },
-          geo: {
-            map: mapType,
-            roam: true,
-            zoom: zoom,
-            center: center,
-            itemStyle: {
-              areaColor: '#ffffff',
-              borderColor: '#cccccc',
-              borderWidth: 0.5
-            },
-            emphasis: {
-              itemStyle: {
-                areaColor: '#f0f0f0',
-                shadowColor: 'rgba(255, 100, 100, 0.5)',
-                shadowBlur: 10
-              }
-            }
-          },
-          series: [{
-            name: '物流热度',
-            type: 'map',
-            map: mapType,
-            geoIndex: 0,
-            data: scaledData,
-            emphasis: {
-              itemStyle: {
-                shadowBlur: 20,
-                shadowColor: 'rgba(255, 50, 50, 0.8)',
-                borderColor: '#ff3333',
-                borderWidth: 2,
-              },
-              label: {
-                show: true,
-                color: '#fff',
-                fontSize: 12,
-                fontWeight: 'bold'
-              }
-            }
-          }]
-        })
-      }
-      
-      // 更新 KPI
-      stats.value = {
-        totalOrders: res.data.totalOrders || 0,
-        gmv: res.data.gmv || 0,
-        otdRate: res.data.otdRate || 0,
-        riskCount: res.data.riskCount || 0,
-        delayRate: res.data.delayRate || 0,
-        orderStatus: res.data.orderStatus || stats.value.orderStatus
-      }
-      
+      applyStatsData(res.data)
     } else if (res.type === 'alert') {
       console.log('收到预警:', res.data)
-      warningList.value.unshift({
-        id: res.data.id,
-        orderId: res.data.orderId,
-        riskType: res.data.riskType,
-        probability: res.data.probability,
-        level: res.data.level || 'danger',
-        icon: res.data.icon || 'fas fa-exclamation-circle',
-        timestamp: res.data.timestamp,
-        xaiAnalysis: res.data.xai_analysis || {}
-      })
-      if (warningList.value.length > 5) {
-        warningList.value.pop()
-      }
+      addAlertItem(res.data)
     }
   }
 
@@ -334,10 +422,13 @@ const connectWebSocket = () => {
   }
 
   socket.onclose = () => {
-    console.log('🔌 WebSocket 连接关闭')
+    console.log('WebSocket 连接关闭')
+    socket = null
+    if (!shouldReconnect) return
     wsStatus.value = 'error'
     wsText.value = '连接断开'
     wsIcon.value = 'fa-times-circle'
+    scheduleReconnect()
   }
 }
 
@@ -346,6 +437,7 @@ const loadHistoryData = async () => {
   try {
     console.log('📈 加载历史趋势...')
     const res = await fetch('/api/v1/kpi/history?hours=24')
+    if (!res.ok) throw new Error(`历史趋势请求失败: ${res.status}`)
     const data = await res.json()
 
     console.log('📈 历史数据:', data)
@@ -373,65 +465,61 @@ const loadHistoryData = async () => {
   }
 }
 
+const renderForecastChart = (days, values) => {
+  if (!forecastChart) return
+
+  forecastChart.setOption({
+    tooltip: { trigger: 'axis' },
+    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: days,
+      axisLine: { lineStyle: { color: '#555' } },
+      axisLabel: { color: '#aaa' }
+    },
+    yAxis: {
+      type: 'value',
+      axisLine: { lineStyle: { color: '#555' } },
+      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+      axisLabel: { color: '#aaa' }
+    },
+    series: [{
+      name: '预测成交量',
+      type: 'line',
+      smooth: true,
+      data: values,
+      lineStyle: { color: '#fac858', width: 3 },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(250, 200, 88, 0.5)' },
+          { offset: 1, color: 'rgba(250, 200, 88, 0.1)' }
+        ])
+      }
+    }]
+  })
+}
+
 // ================== 加载未来7天预测数据 ==================
 const loadForecastData = async () => {
   try {
     console.log('📈 加载未来7天预测...')
     const res = await fetch('/api/v1/forecast')
+    if (!res.ok) throw new Error(`预测请求失败: ${res.status}`)
     const data = await res.json()
 
     console.log('📈 预测数据:', data)
 
-    if (forecastChart) {
-      forecastChart.setOption({
-        xAxis: {
-          type: 'category',
-          boundaryGap: false,
-          data: data.days || ['D+1', 'D+2', 'D+3', 'D+4', 'D+5', 'D+6', 'D+7'],
-          axisLine: { lineStyle: { color: '#555' } },
-          axisLabel: { color: '#aaa' }
-        },
-        series: [{
-          name: '预测成交量',
-          type: 'line',
-          smooth: true,
-          data: data.values || [820, 932, 901, 1234, 1290, 1330, 1520],
-          lineStyle: { color: '#fac858', width: 3 },
-          areaStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: 'rgba(250, 200, 88, 0.5)' },
-              { offset: 1, color: 'rgba(250, 200, 88, 0.1)' }
-            ])
-          }
-        }]
-      })
-    }
+    renderForecastChart(
+      data.days || ['D+1', 'D+2', 'D+3', 'D+4', 'D+5', 'D+6', 'D+7'],
+      data.values || [820, 932, 901, 1234, 1290, 1330, 1520]
+    )
   } catch (err) {
     console.error('❌ 未来7天预测加载失败，使用死数据兜底:', err)
-    if (forecastChart) {
-      forecastChart.setOption({
-        xAxis: {
-          type: 'category',
-          boundaryGap: false,
-          data: ['D+1', 'D+2', 'D+3', 'D+4', 'D+5', 'D+6', 'D+7'],
-          axisLine: { lineStyle: { color: '#555' } },
-          axisLabel: { color: '#aaa' }
-        },
-        series: [{
-          name: '预测成交量',
-          type: 'line',
-          smooth: true,
-          data: [820, 932, 901, 1234, 1290, 1330, 1520],
-          lineStyle: { color: '#fac858', width: 3 },
-          areaStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: 'rgba(250, 200, 88, 0.5)' },
-              { offset: 1, color: 'rgba(250, 200, 88, 0.1)' }
-            ])
-          }
-        }]
-      })
-    }
+    renderForecastChart(
+      ['D+1', 'D+2', 'D+3', 'D+4', 'D+5', 'D+6', 'D+7'],
+      [820, 932, 901, 1234, 1290, 1330, 1520]
+    )
   }
 }
 
@@ -488,7 +576,9 @@ onMounted(() => {
     })
     .then(geo => {
       echarts.registerMap('NA_STATES', geo)
+      registeredMaps.add('NA_STATES')
       console.log('✅ 北美州地图加载成功')
+      if (pendingStatsData) renderHeatMap(pendingStatsData)
     })
     .catch(err => {
       console.error('🌍 北美地图加载失败:', err.message)
@@ -502,7 +592,9 @@ onMounted(() => {
     })
     .then(geo => {
       echarts.registerMap('WORLD', geo)
+      registeredMaps.add('WORLD')
       console.log('✅ 世界地图加载成功')
+      if (pendingStatsData) renderHeatMap(pendingStatsData)
     })
     .catch(err => {
       console.error('🌍 世界地图加载失败:', err.message)
@@ -568,6 +660,8 @@ onMounted(() => {
   forecastChart = echarts.init(document.getElementById('forecast-chart'))
   loadForecastData()
 
+  loadRealtimeKpi()
+  loadRecentAlerts()
   loadHistoryData()
 
   window.addEventListener('resize', () => {
@@ -579,6 +673,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  shouldReconnect = false
+  if (reconnectTimer) window.clearTimeout(reconnectTimer)
   if (socket) socket.close()
   if (pieChart) pieChart.dispose()
   if (mapChart) mapChart.dispose()
