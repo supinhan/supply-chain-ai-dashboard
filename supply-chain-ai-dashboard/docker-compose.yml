@@ -62,7 +62,7 @@ services:
       API_PREFIX: ${API_PREFIX:-/api/v1}
       DATABASE_URL: mysql+pymysql://${MYSQL_USER:-supply_chain}:${MYSQL_PASSWORD:-supply_chain}@mysql-db:3306/${MYSQL_DATABASE:-supply_chain}
       REDIS_URL: redis://redis-cache:6379/0
-      AI_SERVICE_URL: http://ai-service:8000
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://69.164.252.96:20257}
       AI_SERVICE_API_KEY: ${AI_SERVICE_API_KEY:-}
       AI_SERVICE_HMAC_SECRET: ${AI_SERVICE_HMAC_SECRET:-}
       INGEST_API_KEY: ${INGEST_API_KEY:-}
