@@ -440,15 +440,33 @@ const loadHistoryData = async () => {
     if (!res.ok) throw new Error(`历史趋势请求失败: ${res.status}`)
     const data = await res.json()
 
-    console.log('📈 历史数据:', data)
+    console.log('📈 后端返回:', data)
 
-    const buckets = data.items.map(item => {
+    const items = Array.isArray(data.items) ? data.items : []
+    if (items.length === 0) {
+      console.warn('⚠️ 历史数据为空')
+      if (historyChart) {
+        historyChart.setOption({
+          xAxis: { data: [] },
+          series: [{ data: [] }, { data: [] }]
+        })
+      }
+      return
+    }
+
+    const buckets = items.map(item => {
       const d = new Date(item.bucket)
-      return `${d.getMonth() + 1}-${d.getDate()} ${d.getHours()}:00`
+      if (isNaN(d.getTime())) {
+        console.error('❌ 时间解析失败:', item.bucket)
+        return '无效时间'
+      }
+      return `${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')} ${d.getHours().toString().padStart(2, '0')}:00`
     })
 
-    const orderCounts = data.items.map(item => item.order_count)
-    const riskCounts = data.items.map(item => item.risk_count)
+    const orderCounts = items.map(item => Number(item.order_count) || 0)
+    const riskCounts = items.map(item => Number(item.risk_count) || 0)
+
+    console.log('✅ 最终传给图表:', buckets, orderCounts, riskCounts)
 
     if (historyChart) {
       historyChart.setOption({
@@ -458,7 +476,6 @@ const loadHistoryData = async () => {
           { name: '进货量', type: 'line', smooth: true, data: riskCounts }
         ]
       })
-      console.log('✅ 历史趋势渲染完成')
     }
   } catch (err) {
     console.error('❌ 历史趋势加载失败:', err)
