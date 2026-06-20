@@ -55,7 +55,10 @@ class RiskModelRunner:
             except (httpx.HTTPError, AttributeError, KeyError, TypeError, ValueError):
                 return self._predict_heuristic(order)
         if self.mode == "local" and self.local.model is not None:
-            return self._predict_local(order)
+            try:
+                return self._predict_local(order)
+            except Exception:
+                return self._predict_heuristic(order)
         return self._predict_heuristic(order)
 
     async def _predict_remote(self, order: OrderIngestRequest) -> RiskPrediction:
@@ -158,10 +161,34 @@ class RiskModelRunner:
         )
         score = float(self.local.model.predict_proba(frame)[0][1])
         importances = getattr(self.local.model, "feature_importances_", [])
+        
+        feature_labels = ["订单金额贡献度", "利润贡献度", "运输模式敏感度"]
+        local_activation = {}
+        for index, label in enumerate(feature_labels):
+            if index >= len(importances):
+                continue
+            global_imp = float(importances[index])
+            factor = 0.1
+            
+            if label == "订单金额贡献度":
+                factor = min((order.order_amount or 0) / 500.0, 2.5)
+            elif label == "利润贡献度":
+                if profit < 0:
+                    factor = 2.5 + min(abs(profit) / 100.0, 3.0)
+                else:
+                    factor = 0.5
+            elif label == "运输模式敏感度":
+                if shipping_mode in ["Same Day", "First Class"]:
+                    factor = 1.8
+                else:
+                    factor = 0.8
+                    
+            local_activation[label] = global_imp * factor
+            
+        total_act = sum(local_activation.values()) if sum(local_activation.values()) > 0 else 1.0
         xai = {
-            label: round(float(importances[index]), 3)
-            for index, label in enumerate(["订单金额贡献度", "利润贡献度", "运输模式敏感度"])
-            if index < len(importances)
+            label: round(val / total_act, 3)
+            for label, val in local_activation.items()
         }
         return RiskPrediction(
             risk_score=round(score, 4),

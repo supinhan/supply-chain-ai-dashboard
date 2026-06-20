@@ -1,9 +1,13 @@
 import os
 import pandas as pd
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')  # 确保在 Docker 或无 GUI 的 Linux 服务器环境中安全保存图片
-import matplotlib.pyplot as plt
+try:
+    import matplotlib
+    matplotlib.use('Agg')  # 确保在 Docker 或无 GUI 的 Linux 服务器环境中安全保存图片
+    import matplotlib.pyplot as plt
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
@@ -46,6 +50,9 @@ def get_wealth_score(city_name):
 
 def plot_feature_importance(importances, feature_names, model_name, filename):
     """生成并保存特征重要性条形图"""
+    if not HAS_MATPLOTLIB:
+        print(f"  [⚠️] 缺失 matplotlib 库，跳过特征重要性图表生成: {filename}")
+        return
     indices = np.argsort(importances)[::-1]
     sorted_features = [feature_names[i] for i in indices]
     sorted_importance = importances[indices]
@@ -154,9 +161,14 @@ def clean_and_train():
     print(f"\n[安全检查] 最终进入模型的特征总数: {len(all_features)} 维")
 
     # ============================================================
+    # ============================================================
     print("\n=== [MLOps] 3. 训练：风险拦截分类模型（RandomForest + ANN双模） ===")
     # ============================================================
-    X_risk = df[all_features]
+    # ✨【核心修复】：从特征列表中剔除所有直接或间接泄露利润信息的特征列
+    risk_train_features = [f for f in all_features if f != 'Order Profit Per Order' and not f.startswith('profit_')]
+    print(f"  [MLOps] 过滤利润特征泄露后，风险模型训练特征维度: {len(risk_train_features)} 维")
+
+    X_risk = df[risk_train_features]
     y_risk = df['is_risk']
     X_tr, X_te, y_tr, y_te = train_test_split(X_risk, y_risk, test_size=0.2, random_state=42)
 
@@ -179,15 +191,15 @@ def clean_and_train():
     joblib.dump(rf_risk, 'model/risk_model.pkl')
     joblib.dump(ann_risk, 'model/ann_risk_model.pkl')
     joblib.dump(scaler_risk, 'model/scaler_risk.pkl')
-    joblib.dump(all_features, 'model/risk_features.pkl')
+    joblib.dump(risk_train_features, 'model/risk_features.pkl')
     print(f"  [✓] 风险拦截多任务模型及元数据导出成功")
 
-    plot_feature_importance(rf_risk.feature_importances_, all_features, 'Risk Classification Model', 'feature_importance_risk.png')
+    plot_feature_importance(rf_risk.feature_importances_, risk_train_features, 'Risk Classification Model', 'feature_importance_risk.png')
 
     # ============================================================
     print("\n=== [MLOps] 4. 训练：延迟交付预测模型（RF + ANN） ===")
     # ============================================================
-    X_delay = df[all_features]
+    X_delay = df[risk_train_features]
     y_delay = df['is_delayed']
     X_tr2, X_te2, y_tr2, y_te2 = train_test_split(X_delay, y_delay, test_size=0.2, random_state=42)
 
@@ -203,10 +215,10 @@ def clean_and_train():
     joblib.dump(rf_delay, 'model/delay_model.pkl')
     joblib.dump(ann_delay, 'model/ann_delay_model.pkl')
     joblib.dump(scaler_delay, 'model/scaler_delay.pkl')
-    joblib.dump(all_features, 'model/delay_features.pkl')
+    joblib.dump(risk_train_features, 'model/delay_features.pkl')
     print("  [✓] 延迟预测模型导出成功")
 
-    plot_feature_importance(rf_delay.feature_importances_, all_features, 'Delay Prediction Model', 'feature_importance_delay.png')
+    plot_feature_importance(rf_delay.feature_importances_, risk_train_features, 'Delay Prediction Model', 'feature_importance_delay.png')
 
     # ============================================================
     print("\n=== [MLOps] 5. 训练：未来7天销量趋势预测回归模型 ===")

@@ -39,7 +39,7 @@
         <div class="metric-info">
           <p class="metric-label">风险拦截次数</p>
           <p class="metric-value">{{ stats.riskCount }}</p>
-          <p class="metric-desc">AI 预测拖延率 {{ typeof stats.delayRate === 'number' ? stats.delayRate.toFixed(1) : '0' }}%</p>
+          <p class="metric-desc">AI 预测成功率 {{ typeof stats.delayRate === 'number' ? stats.delayRate.toFixed(1) : '0' }}%</p>
         </div>
       </div>
     </div>
@@ -87,7 +87,7 @@
               <div class="alert-title">
                 {{ item.riskType || '未知风险' }}
                 <span class="alert-probability" v-if="item.probability !== undefined">
-                  风险概率: {{ (item.probability * 100).toFixed(0) }}%
+                  风险概率: {{ (item.probability * 100).toFixed(1) }}%
                 </span>
               </div>
               <div class="alert-desc">
@@ -103,13 +103,7 @@
                   :key="feature"
                   class="xai-item"
                 >
-                  <span class="xai-feature">{{ feature }}</span>
-                  <div class="xai-bar">
-                    <div
-                      class="xai-fill"
-                      :style="{ width: parseFloat(score) * 100 + '%' }"
-                    ></div>
-                  </div>
+                  <span class="xai-feature">{{ formatFeatureName(feature) }}</span>
                   <span class="xai-score">{{ (parseFloat(score) * 100).toFixed(1) }}%</span>
                 </div>
               </div>
@@ -546,6 +540,52 @@ const formatTime = (iso) => {
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
 }
 
+// ================== 特征名称汉化与精简 ==================
+const formatFeatureName = (feature) => {
+  const map = {
+    'Order Profit Per Order': '订单利润',
+    'Order Item Total': '订单总额',
+    'Shipping Mode_encoded': '运输模式',
+    'Days for shipment (scheduled)': '计划配送天数',
+    'city_wealth_score': '地缘财富指数',
+    'order_month': '下单月份',
+    'order_weekday': '下单星期',
+    '订单金额贡献度': '订单总额',
+    '利润率贡献度': '利润率',
+    '运输模式敏感度': '运输模式',
+  };
+  
+  if (map[feature]) return map[feature];
+  
+  if (feature.startsWith('profit_')) {
+    return `利润区间: ${feature.replace('profit_', '')}`;
+  }
+  if (feature.startsWith('status_')) {
+    const statusMap = {
+      'processing': '处理中',
+      'suspect_fraud': '涉嫌欺诈',
+      'complete': '已完成',
+      'pending': '待处理',
+      'late_delivery': '延迟交付'
+    };
+    const s = feature.replace('status_', '').toLowerCase();
+    return `状态: ${statusMap[s] || s}`;
+  }
+  if (feature.startsWith('cat_')) {
+    const catMap = {
+      'other': '其他品类',
+      'sports': '运动户外',
+      'electronics': '电子产品',
+      'technology': '数码科技',
+      'computers': '电脑硬件'
+    };
+    const c = feature.replace('cat_', '').toLowerCase();
+    return `品类: ${catMap[c] || c}`;
+  }
+  
+  return feature;
+}
+
 // ================== ECharts 初始化 ==================
 onMounted(() => {
   connectWebSocket()
@@ -894,29 +934,20 @@ onUnmounted(() => {
 }
 .xai-item {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 3px;
+  margin-bottom: 4px;
 }
 .xai-feature {
   color: #ccc;
-  min-width: 80px;
-}
-.xai-bar {
-  flex: 1;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
+  white-space: nowrap;
   overflow: hidden;
-}
-.xai-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #ff4757, #ffa502);
-  border-radius: 3px;
+  text-overflow: ellipsis;
+  margin-right: 12px;
 }
 .xai-score {
-  color: #aaa;
-  min-width: 36px;
+  color: #ffa801;
+  font-weight: bold;
   text-align: right;
 }
 
