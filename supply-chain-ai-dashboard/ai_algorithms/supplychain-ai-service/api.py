@@ -332,31 +332,6 @@ async def predict_risk(data: OrderInput, _: None = Depends(verify_service_auth))
         }
 
     return res
-    if delay_prob > 0.70: risk_reasons.append(f"物流拖延概率达 {delay_prob*100:.1f}%，预计实际配送天数将严重超出排程")
-    if not risk_reasons: risk_reasons.append("多特征协同评估：触发组合逻辑风控预警")
-
-    res = {
-        "risk_score": round(max_risk_prob, 4),
-        "risk_percentage": f"{max_risk_prob * 100:.1f}%",
-        "is_high_risk": is_high_risk,
-        "risk_level": "高风险拦截" if max_risk_prob > 0.85 else ("中度关注" if max_risk_prob > 0.5 else "绿色安全"),
-        "risk_reasons": risk_reasons,
-        "xai_analysis": {
-            "explain_method": "RandomForest MLOps Feature Importance Analysis",
-            "top_features_attribution": top5_xai,
-            "business_note": "该权重代表系统针对此订单特征状态的局部归因分析"
-        }
-    }
-
-    if is_high_risk:
-        res["alert_detail"] = {
-            "order_id": data.order_id,
-            "risk_type": risk_type,
-            "probability": round(max_risk_prob, 4),
-            "timestamp": datetime.now().isoformat()
-        }
-
-    return res
 
 
 @app.get("/api/v1/forecast", summary="未来7天销量趋势预测折线图接口（GET版）")
