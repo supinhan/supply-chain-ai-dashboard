@@ -308,13 +308,7 @@ npm install
 npm run dev
 ```
 
-### 3. 一键运行自动化测试套件
-系统测试脚本已按照 19 项用例整齐划分存放在 `test/` 目录下。我们提供了一键测试运行器 `test/run_all.py`，它会自动并行/串行调度所有自动化用例，并在各自的用例目录下生成实际的运行日志 `result.log`：
-```bash
-cd supply-chain-ai-dashboard
-# 确保后台已启动 backend_api(8000) 和 ai-service(8081)
-python test/run_all.py
-```
+
 
 ---
 
