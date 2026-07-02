@@ -2,7 +2,7 @@
 
 本项目是一个供应链可视化与智能预警系统。系统使用 Kaggle DataCo 供应链数据集模拟实时订单流，通过后端服务调用 AI 风险模型完成在线评分，并将实时 KPI 与高风险告警推送到前端大屏。
 
-当前阶段目标是跑通基础闭环：
+基础闭环：
 
 ```text
 DataCo CSV 回放 -> FastAPI 后端接收 -> AI 风险评分 -> MySQL/Redis 写入 -> WebSocket 推送 -> Vue 大屏展示
